@@ -1,0 +1,16 @@
+cabal-version:    2.4
+
+name:       plugin-example
+version:    0
+build-type: Simple
+
+executable example
+  main-is:             Main.hs
+  build-depends:
+    base                 >= 4.13  && < 4.14,
+    ghc-bslit-linter,
+    bytestring,
+  ghc-options:
+    -Wall
+    -fplugin=GHC.Plugin.BSLitLinter
+  default-language:    Haskell2010

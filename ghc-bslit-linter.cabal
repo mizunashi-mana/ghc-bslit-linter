@@ -1,0 +1,74 @@
+cabal-version:       2.4
+
+name:                ghc-bslit-linter
+version:             0.1.0.0
+synopsis:
+description:
+category:
+homepage:            https://github.com/mizunashi-mana/ghc-bslit-linter
+
+license:             Apache-2.0 OR MPL-2.0
+copyright:           Copyright © 2019 Mizunashi Mana
+
+author:              Mizunashi Mana
+maintainer:          axnnoindexr11@gmail.com
+bug-reports:         https://github.com/mizunashi-mana/ghc-bslit-linter/issues
+
+build-type:          Custom
+
+license-files:
+  LICENSE.Apache-2.0
+  LICENSE.MPL-2.0
+  LICENSE_NOTICE.md
+
+source-repository head
+  type:     git
+  location: https://github.com/mizunashi-mana/ghc-bslit-linter.git
+
+flag develop
+  default:     False
+  manual:      True
+  description: Turn on some options for development
+
+common general
+  autogen-modules:
+    Paths_ghc_bslit_linter
+  other-modules:
+    Paths_ghc_bslit_linter
+  build-depends:
+    base                 >= 4.13  && < 4.14,
+    ghc,
+    bytestring,
+  default-language: Haskell2010
+  default-extensions:
+    BangPatterns
+    FlexibleContexts
+    GADTs
+    GeneralizedNewtypeDeriving
+    NamedFieldPuns
+
+  if flag(develop)
+    ghc-options:
+      -Wall
+      -Wcompat
+      -Wincomplete-uni-patterns
+      -Wincomplete-record-updates
+      -Wredundant-constraints
+      -Wpartial-fields
+
+      -fprint-explicit-foralls
+      -fprint-potential-instances
+      -frefinement-level-hole-fits=1
+
+      -dcore-lint
+
+custom-setup
+  setup-depends:
+    base,
+    Cabal,
+
+library
+  import:              general
+  hs-source-dirs:      src
+  exposed-modules:
+    GHC.Plugin.BSLitLinter
