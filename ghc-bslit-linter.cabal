@@ -2,10 +2,11 @@ cabal-version:       2.4
 
 name:                ghc-bslit-linter
 version:             0.1.0.0
-synopsis:
-description:
-category:
+synopsis:            ByteString Literal Lint Plugin
+category:            Plugin
 homepage:            https://github.com/mizunashi-mana/ghc-bslit-linter
+description:
+  This is a GHC Compiler Plugin to lint overloaded IsString literal more powerfully.
 
 license:             Apache-2.0 OR MPL-2.0
 copyright:           Copyright © 2019 Mizunashi Mana
@@ -38,7 +39,7 @@ common general
   build-depends:
     base                 >= 4.13  && < 4.14,
     ghc,
-    bytestring,
+    bytestring           >= 0.10.9 && < 0.11,
   default-language: Haskell2010
   default-extensions:
     BangPatterns
