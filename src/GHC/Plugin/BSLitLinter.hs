@@ -3,14 +3,17 @@ module GHC.Plugin.BSLitLinter (plugin) where
 import           Control.Monad
 import           Control.Monad.IO.Class
 import qualified System.IO              as System
+import qualified Data.Char              as Char
 
 import qualified GhcPlugins
-import qualified DynFlags
-import qualified Outputable
 import qualified Pretty
-import qualified TcRnTypes
-import qualified SrcLoc
-import qualified HsExtension
+import qualified Bag
+import qualified ErrUtils
+import qualified Finder
+import qualified IfaceEnv
+import qualified TcRnTypes   as TcM
+import qualified TcRnMonad   as TcM
+import qualified HsExtension as HsSyn
 import qualified HsBinds     as HsSyn
 import qualified HsExpr      as HsSyn
 import qualified HsLit       as HsSyn
@@ -24,19 +27,17 @@ plugin = GhcPlugins.defaultPlugin
   }
 
 bsLitLinterPlugin :: [GhcPlugins.CommandLineOption] -> GhcPlugins.ModSummary
-  -> TcRnTypes.TcGblEnv -> TcRnTypes.TcM TcRnTypes.TcGblEnv
+  -> TcM.TcGblEnv -> TcM.TcM TcM.TcGblEnv
 bsLitLinterPlugin _args mods tcEnv = do
-  let lbinds = TcRnTypes.tcg_binds tcEnv
+  let lbinds = TcM.tcg_binds tcEnv
   lintLHsBinds lbinds
-  liftIO $ putStrLn "lbinds:"
-  printPprWithDebugStyle lbinds
   pure tcEnv
 
-lintLHsBinds :: HsSyn.LHsBinds HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintLHsBinds :: HsSyn.LHsBinds HsSyn.GhcTc -> TcM.TcM ()
 lintLHsBinds lbinds = forM_ lbinds lintLHsBind
 
-lintLHsBind :: HsSyn.LHsBind HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLHsBind lbind = go $ SrcLoc.unLoc lbind
+lintLHsBind :: HsSyn.LHsBind HsSyn.GhcTc -> TcM.TcM ()
+lintLHsBind lbind = go $ GhcPlugins.unLoc lbind
   where
     go HsSyn.FunBind{ HsSyn.fun_matches } = lintMatchGroup fun_matches
     go HsSyn.PatBind{ HsSyn.pat_rhs } = lintGRHSs pat_rhs
@@ -47,49 +48,49 @@ lintLHsBind lbind = go $ SrcLoc.unLoc lbind
 
 type ExprMatchGroup p = HsSyn.MatchGroup p (HsSyn.LHsExpr p)
 
-lintMatchGroup :: ExprMatchGroup HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintMatchGroup :: ExprMatchGroup HsSyn.GhcTc -> TcM.TcM ()
 lintMatchGroup mg = go mg
   where
-    go HsSyn.MG{ HsSyn.mg_alts } = forM_ (SrcLoc.unLoc mg_alts) lintLMatch
+    go HsSyn.MG{ HsSyn.mg_alts } = forM_ (GhcPlugins.unLoc mg_alts) lintLMatch
     go HsSyn.XMatchGroup{} = pure ()
 
 type LExprMatch p = HsSyn.LMatch p (HsSyn.LHsExpr p)
 
-lintLMatch :: LExprMatch HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLMatch m = go $ SrcLoc.unLoc m
+lintLMatch :: LExprMatch HsSyn.GhcTc -> TcM.TcM ()
+lintLMatch m = go $ GhcPlugins.unLoc m
   where
     go HsSyn.Match{ HsSyn.m_grhss } = lintGRHSs m_grhss
     go HsSyn.XMatch{} = pure ()
 
-lintLHsLocalBinds :: HsSyn.LHsLocalBinds HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLHsLocalBinds lbinds = go $ SrcLoc.unLoc lbinds
+lintLHsLocalBinds :: HsSyn.LHsLocalBinds HsSyn.GhcTc -> TcM.TcM ()
+lintLHsLocalBinds lbinds = go $ GhcPlugins.unLoc lbinds
   where
     go (HsSyn.HsValBinds _ binds) = lintHsValBinds binds
     go (HsSyn.HsIPBinds _ binds) = lintHsIPBinds binds
     go HsSyn.EmptyLocalBinds{} = pure ()
     go HsSyn.XHsLocalBindsLR{} = pure ()
 
-lintHsValBinds :: HsSyn.HsValBinds HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintHsValBinds :: HsSyn.HsValBinds HsSyn.GhcTc -> TcM.TcM ()
 lintHsValBinds binds = go binds
   where
     go (HsSyn.ValBinds _ binds _) = lintLHsBinds binds
     go HsSyn.XValBindsLR{} = pure ()
 
-lintHsIPBinds :: HsSyn.HsIPBinds HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintHsIPBinds :: HsSyn.HsIPBinds HsSyn.GhcTc -> TcM.TcM ()
 lintHsIPBinds ipbinds = go ipbinds
   where
     go (HsSyn.IPBinds _ binds) = forM_ binds lintLIPBind
     go HsSyn.XHsIPBinds{} = pure ()
 
-lintLIPBind :: HsSyn.LIPBind HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLIPBind lbind = go $ SrcLoc.unLoc lbind
+lintLIPBind :: HsSyn.LIPBind HsSyn.GhcTc -> TcM.TcM ()
+lintLIPBind lbind = go $ GhcPlugins.unLoc lbind
   where
     go (HsSyn.IPBind _ _ expr) = lintLHsExpr expr
     go HsSyn.XIPBind{} = pure ()
 
 type GExprRHSs p = HsSyn.GRHSs p (HsSyn.LHsExpr p)
 
-lintGRHSs :: GExprRHSs HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintGRHSs :: GExprRHSs HsSyn.GhcTc -> TcM.TcM ()
 lintGRHSs grhss = go grhss
   where
     go HsSyn.GRHSs{ HsSyn.grhssGRHSs, HsSyn.grhssLocalBinds } = do
@@ -99,20 +100,14 @@ lintGRHSs grhss = go grhss
 
 type LGExprRHS p = HsSyn.LGRHS p (HsSyn.LHsExpr p)
 
-lintLGRHS :: LGExprRHS HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLGRHS lgrhs = go $ SrcLoc.unLoc lgrhs
+lintLGRHS :: LGExprRHS HsSyn.GhcTc -> TcM.TcM ()
+lintLGRHS lgrhs = go $ GhcPlugins.unLoc lgrhs
   where
     go (HsSyn.GRHS _ _ rhs) = lintLHsExpr rhs
     go HsSyn.XGRHS{} = pure ()
 
-lintLHsExpr :: HsSyn.LHsExpr HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLHsExpr lexpr = do
-  liftIO $ putStrLn "lintHsExpr:"
-  printPprWithDebugStyle lexpr
-  lintHsExpr $ SrcLoc.unLoc lexpr
-
-lintHsExpr :: HsSyn.HsExpr HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintHsExpr expr = go expr
+lintLHsExpr :: HsSyn.LHsExpr HsSyn.GhcTc -> TcM.TcM ()
+lintLHsExpr (GhcPlugins.L loc expr) = go expr
   where
     go HsSyn.HsVar{}        = pure ()
     go HsSyn.HsUnboundVar{} = pure ()
@@ -121,7 +116,7 @@ lintHsExpr expr = go expr
     go HsSyn.HsOverLabel{}  = pure ()
     go HsSyn.HsLit{}        = pure ()
 
-    go (HsSyn.HsOverLit _ l) = lintHsOverLit l
+    go (HsSyn.HsOverLit _ l) = lintHsOverLit loc l
 
     go (HsSyn.HsPar _ e) = lintLHsExpr e
     go (HsSyn.HsCoreAnn _ _ _ e) = lintLHsExpr e
@@ -143,7 +138,7 @@ lintHsExpr expr = go expr
     go (HsSyn.HsLet _ lbinds e) = do
       lintLHsLocalBinds lbinds
       lintLHsExpr e
-    go (HsSyn.HsDo _ _ lstmts) = forM_ (SrcLoc.unLoc lstmts) lintExprLStmt
+    go (HsSyn.HsDo _ _ lstmts) = forM_ (GhcPlugins.unLoc lstmts) lintExprLStmt
     go (HsSyn.ExplicitList _ _ es) = forM_ es lintLHsExpr
     go HsSyn.RecordCon{ HsSyn.rcon_flds } = lintHsRecordBinds rcon_flds
     go HsSyn.RecordUpd{ HsSyn.rupd_expr, HsSyn.rupd_flds } = do
@@ -157,7 +152,7 @@ lintHsExpr expr = go expr
     go (HsSyn.EViewPat _ p e) = forM_ [p, e] lintLHsExpr
 
     go (HsSyn.HsSCC _ _ _ e) = lintLHsExpr e
-    go (HsSyn.HsWrap _ _ e) = lintHsExpr e
+    go (HsSyn.HsWrap _ _ e) = lintLHsExpr $ GhcPlugins.L loc e
 
     go (HsSyn.HsSpliceE _ s) = lintHsSplice s
     go (HsSyn.HsBracket _ b) = lintHsBracket b
@@ -177,33 +172,33 @@ lintHsExpr expr = go expr
     go HsSyn.HsRecFld{} = pure ()
     go HsSyn.XExpr{} = pure ()
 
-lintPendingTcSplice :: HsSyn.PendingTcSplice -> TcRnTypes.TcM ()
+lintPendingTcSplice :: HsSyn.PendingTcSplice -> TcM.TcM ()
 lintPendingTcSplice splice = go splice
   where
     go = undefined
 
-lintHsSplice :: HsSyn.HsSplice HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintHsSplice :: HsSyn.HsSplice HsSyn.GhcTc -> TcM.TcM ()
 lintHsSplice splice = go splice
   where
     go = undefined
 
-lintHsBracket :: HsSyn.HsBracket HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintHsBracket :: HsSyn.HsBracket HsSyn.GhcTc -> TcM.TcM ()
 lintHsBracket bracket = go bracket
   where
     go = undefined
 
-lintLPat :: HsSyn.LPat HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLPat lpat = go $ SrcLoc.unLoc lpat
+lintLPat :: HsSyn.LPat HsSyn.GhcTc -> TcM.TcM ()
+lintLPat lpat = go $ GhcPlugins.unLoc lpat
   where
     go = undefined
 
-lintLHsCmdTop :: HsSyn.LHsCmdTop HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLHsCmdTop cmd = go $ SrcLoc.unLoc cmd
+lintLHsCmdTop :: HsSyn.LHsCmdTop HsSyn.GhcTc -> TcM.TcM ()
+lintLHsCmdTop cmd = go $ GhcPlugins.unLoc cmd
   where
     go = undefined
 
-lintExprLStmt :: HsSyn.ExprLStmt HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintExprLStmt lstmt = go $ SrcLoc.unLoc lstmt
+lintExprLStmt :: HsSyn.ExprLStmt HsSyn.GhcTc -> TcM.TcM ()
+lintExprLStmt (GhcPlugins.L loc stmt) = go stmt
   where
     go (HsSyn.LastStmt _ e _ _) = lintLHsExpr e
     go (HsSyn.BindStmt _ p e _ _) = do
@@ -214,47 +209,112 @@ lintExprLStmt lstmt = go $ SrcLoc.unLoc lstmt
     go (HsSyn.LetStmt _ bs) = lintLHsLocalBinds bs
     go (HsSyn.ParStmt _ ss e _) = do
       forM_ ss lintParStmtBlock
-      lintHsExpr e
+      lintLHsExpr $ GhcPlugins.L loc e
     go HsSyn.TransStmt{} = undefined
     go HsSyn.RecStmt{} = undefined
     go HsSyn.XStmtLR{} = pure ()
 
 type HsParStmtBlock p = HsSyn.ParStmtBlock p p
 
-lintParStmtBlock :: HsParStmtBlock HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintParStmtBlock :: HsParStmtBlock HsSyn.GhcTc -> TcM.TcM ()
 lintParStmtBlock block = go block
   where
     go = undefined
 
-lintHsRecordBinds :: HsSyn.HsRecordBinds HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintHsRecordBinds :: HsSyn.HsRecordBinds HsSyn.GhcTc -> TcM.TcM ()
 lintHsRecordBinds binds = go binds
   where
     go = undefined
 
-lintLHsRecUpdField :: HsSyn.LHsRecUpdField HsExtension.GhcTc -> TcRnTypes.TcM ()
+lintLHsRecUpdField :: HsSyn.LHsRecUpdField HsSyn.GhcTc -> TcM.TcM ()
 lintLHsRecUpdField field = go field
   where
     go = undefined
 
-lintLHsTupArg :: HsSyn.LHsTupArg HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintLHsTupArg arg = go $ SrcLoc.unLoc arg
+lintLHsTupArg :: HsSyn.LHsTupArg HsSyn.GhcTc -> TcM.TcM ()
+lintLHsTupArg arg = go $ GhcPlugins.unLoc arg
   where
     go (HsSyn.Present _ e) = lintLHsExpr e
     go HsSyn.Missing{} = pure ()
     go HsSyn.XTupArg{} = pure ()
 
-lintHsOverLit :: HsSyn.HsOverLit HsExtension.GhcTc -> TcRnTypes.TcM ()
-lintHsOverLit lit = go lit
+lintHsOverLit :: GhcPlugins.SrcSpan -> HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM ()
+lintHsOverLit loc lit = getByteStringLiteral lit >>= \case
+    Nothing -> pure ()
+    Just l -> unless (isValidByteStringLiteral l) $ do
+      dynFlags <- GhcPlugins.getDynFlags
+      liftIO $ GhcPlugins.printOrThrowWarnings dynFlags $ warns dynFlags l
   where
-    go HsSyn.OverLit{ HsSyn.ol_val } = do
-      liftIO $ putStrLn "lintHsOverLit:"
-      printPprWithDebugStyle ol_val
-    go HsSyn.XOverLit{} = pure ()
+    warns dynFlags l =
+      let errDoc = ErrUtils.errDoc
+            [ GhcPlugins.text "Illegal ByteString overloaded literal" ]
+            [ GhcPlugins.text $ "In the overloaded literal: \"" ++ l ++ "\"" ]
+            [ GhcPlugins.text "May crash here."
+            , GhcPlugins.text "Avoit to use non-8bit characters or use Text instead."
+            ]
+          msg = ErrUtils.formatErrDoc dynFlags errDoc
+          warnMsg = ErrUtils.mkPlainWarnMsg dynFlags loc msg
+      in Bag.unitBag warnMsg
 
-printPprWithDebugStyle :: Outputable.Outputable a => a -> TcRnTypes.TcM ()
-printPprWithDebugStyle x = do
-  dynFlags <- DynFlags.getDynFlags
-  let mode = Pretty.PageMode
-      pprStyle = Outputable.defaultDumpStyle dynFlags
-      sdoc = Outputable.ppr x
-  liftIO $ Outputable.printSDocLn mode dynFlags System.stdout pprStyle sdoc
+isByteStringTyCon :: GhcPlugins.TyCon -> TcM.TcM Bool
+isByteStringTyCon tyCon = do
+    hscEnv <- TcM.getTopEnv
+
+    orMFB
+      [ strictByteStringTyConNameM hscEnv
+      , lazyByteStringTyConNameM hscEnv
+      ]
+  where
+    tn = GhcPlugins.tyConName tyCon
+
+    strictByteStringTyConNameM hscEnv = do
+      fr <- liftIO $ Finder.findImportedModule hscEnv strictByteStringModule bytestringPackage
+      case fr of
+        Finder.Found _ md -> do
+          bsTn <- IfaceEnv.lookupOrig md $ GhcPlugins.mkTcOcc "ByteString"
+          pure $ bsTn == tn
+        _ -> pure False
+
+    lazyByteStringTyConNameM hscEnv = do
+      fr <- liftIO $ Finder.findImportedModule hscEnv lazyByteStringModule bytestringPackage
+      case fr of
+        Finder.Found _ md -> do
+          bsTn <- IfaceEnv.lookupOrig md $ GhcPlugins.mkTcOcc "ByteString"
+          pure $ bsTn == tn
+        _ -> pure False
+
+    bytestringPackage = Just $ GhcPlugins.fsLit "bytestring"
+
+    strictByteStringModule = GhcPlugins.mkModuleName "Data.ByteString.Internal"
+    lazyByteStringModule = GhcPlugins.mkModuleName "Data.ByteString.Lazy.Internal"
+
+    orMFB ms = foldr (\m mb -> m >>= \x -> if x then pure x else mb) (pure False) ms
+
+getByteStringLiteral :: HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM (Maybe String)
+getByteStringLiteral lit = case getIsStringLiteral lit of
+  Nothing -> pure Nothing
+  Just (l, tc) -> do
+    b <- isByteStringTyCon tc
+    pure $ if b then Just l else Nothing
+
+getIsStringLiteral :: HsSyn.HsOverLit HsSyn.GhcTc -> Maybe (String, GhcPlugins.TyCon)
+getIsStringLiteral (HsSyn.OverLit {
+    HsSyn.ol_val = HsSyn.HsIsString _ l,
+    HsSyn.ol_ext = HsSyn.OverLitTc _ ty
+  }) = do
+    tc <- GhcPlugins.tyConAppTyCon_maybe ty
+    pure (GhcPlugins.unpackFS l, tc)
+getIsStringLiteral _ = Nothing
+
+isValidByteStringLiteral :: String -> Bool
+isValidByteStringLiteral lit = all isWord8Char lit
+
+isWord8Char :: Char -> Bool
+isWord8Char c = Char.ord c <= 256
+
+printOutputableForDebug :: GhcPlugins.Outputable a => a -> TcM.TcM ()
+printOutputableForDebug x = do
+  dynFlags <- GhcPlugins.getDynFlags
+  let sdoc = GhcPlugins.ppr x
+  let str = GhcPlugins.showSDocDebug dynFlags sdoc
+  liftIO $ putStrLn str

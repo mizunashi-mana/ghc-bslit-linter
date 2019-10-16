@@ -45,6 +45,7 @@ common general
     FlexibleContexts
     GADTs
     GeneralizedNewtypeDeriving
+    LambdaCase
     NamedFieldPuns
 
   if flag(develop)
