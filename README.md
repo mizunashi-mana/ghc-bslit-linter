@@ -2,10 +2,11 @@
 
 This is a GHC Plugin to lint ByteString literal.
 
-## Notice
+## Usage
 
-This is not supported some expressions yet.
-Your compilation may be crashed with this plugin.
+Install ``ghc-bslit-linter`` and compile with ``-fplugin=GHC.Plugin.BSLitLinter`` option.
+
+See [the example project](example).
 
 ## License
 
