@@ -40,10 +40,10 @@ lintHsOverLit loc lit = checkHsOverLit lit >>= \case
   where
     warns dynFlags l =
       let errDoc = ErrUtils.errDoc
-            [ GhcPlugins.text "Illegal ByteString overloaded literal" ]
-            [ GhcPlugins.text $ "In the overloaded literal: \"" ++ l ++ "\"" ]
+            [ GhcPlugins.text $ "Literal \"" ++ l ++ "\" contains illegal characters" ]
+            [ ]
             [ GhcPlugins.text "May crash here."
-            , GhcPlugins.text "Avoit to use non-8bit characters or use Text instead."
+            , GhcPlugins.text "Avoid to use non-8bit characters or use Text instead."
             ]
           msg = ErrUtils.formatErrDoc dynFlags errDoc
           warnMsg = ErrUtils.mkPlainWarnMsg dynFlags loc msg

@@ -37,10 +37,10 @@ common general
   other-modules:
     Paths_ghc_bslit_linter
   build-depends:
-    base                 >= 4.13  && < 4.14,
-    ghc,
+    base                 >= 4.13   && < 4.14,
+    ghc                  >= 8.6    && < 9,
     bytestring           >= 0.10.9 && < 0.11,
-    syb                  >= 0.7.1 && < 0.8,
+    syb                  >= 0.7.1  && < 0.8,
   default-language: Haskell2010
   default-extensions:
     BangPatterns
