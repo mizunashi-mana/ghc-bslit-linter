@@ -40,10 +40,9 @@ lintHsOverLit loc lit = checkHsOverLit lit >>= \case
   where
     warns dynFlags l =
       let errDoc = ErrUtils.errDoc
-            [ GhcPlugins.text $ "Literal \"" ++ l ++ "\" contains illegal characters" ]
+            [ GhcPlugins.text $ "Literal \"" ++ l ++ "\" contains illegal characters for ByteString" ]
             [ ]
-            [ GhcPlugins.text "May crash here."
-            , GhcPlugins.text "Avoid to use non-8bit characters or use Text instead."
+            [ GhcPlugins.text "Avoid to use non-8bit characters or may use Text instead."
             ]
           msg = ErrUtils.formatErrDoc dynFlags errDoc
           warnMsg = ErrUtils.mkPlainWarnMsg dynFlags loc msg
@@ -89,6 +88,7 @@ isByteStringTyCon tyCon = do
     lazyByteStringModule = GhcPlugins.mkModuleName "Data.ByteString.Lazy.Internal"
 
     orMFB ms = foldr (\m mb -> m >>= \x -> if x then pure x else mb) (pure False) ms
+    {-# INLINE orMFB #-}
 
 getByteStringLiteral :: HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM (Maybe String)
 getByteStringLiteral lit = case getIsStringLiteral lit of
