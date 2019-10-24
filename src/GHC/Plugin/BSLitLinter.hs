@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module GHC.Plugin.BSLitLinter (plugin) where
 
 import GHC.Plugin.BSLitLinter.Internal
