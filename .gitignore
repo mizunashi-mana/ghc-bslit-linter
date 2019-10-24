@@ -1,2 +1,3 @@
 # GHC
 /dist*/
+cabal.project.local
