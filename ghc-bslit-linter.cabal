@@ -49,6 +49,8 @@ common general
     GeneralizedNewtypeDeriving
     LambdaCase
     NamedFieldPuns
+    RankNTypes
+    ScopedTypeVariables
 
   if flag(develop)
     ghc-options:

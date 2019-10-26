@@ -3,9 +3,8 @@ module GHC.Plugin.BSLitLinter.Internal where
 import           Control.Monad
 import           Control.Monad.IO.Class
 import qualified Data.Char              as Char
-import qualified Generics.SYB           as SYB
-import           Data.Maybe             (isJust)
 import           Data.Typeable
+import qualified Generics.SYB           as SYB
 
 import qualified GhcPlugins
 import qualified Bag
@@ -22,14 +21,12 @@ import qualified HsLit       as HsSyn
 
 
 lintLHsBinds :: HsSyn.LHsBinds HsSyn.GhcTc -> TcM.TcM ()
-lintLHsBinds lbinds = forM_ (SYB.listify checkExpr lbinds) go
+lintLHsBinds lbinds = forM_ (SYB.listify (const True) lbinds) go
   where
     go (GhcPlugins.L loc expr) = case expr of
       HsSyn.HsWrap _ _ e  -> go $ GhcPlugins.L loc e
       HsSyn.HsOverLit _ l -> lintHsOverLit loc l
       _                   -> pure ()
-
-    checkExpr x = isJust (cast x :: Maybe (HsSyn.LHsExpr HsSyn.GhcTc))
 
 lintHsOverLit :: GhcPlugins.SrcSpan -> HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM ()
 lintHsOverLit loc lit = checkHsOverLit lit >>= \case
