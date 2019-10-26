@@ -3,9 +3,10 @@ module GHC.Plugin.BSLitLinter.Internal where
 import           Control.Monad
 import           Control.Monad.IO.Class
 import qualified Data.Char              as Char
-import qualified Generics.SYB           as SYB
-import           Data.Maybe             (isJust)
+import           Data.Functor
+import           Data.Foldable
 import           Data.Typeable
+import qualified Generics.SYB           as SYB
 
 import qualified GhcPlugins
 import qualified Bag
@@ -22,17 +23,59 @@ import qualified HsLit       as HsSyn
 
 
 lintLHsBinds :: HsSyn.LHsBinds HsSyn.GhcTc -> TcM.TcM ()
-lintLHsBinds lbinds = forM_ (SYB.listify checkExpr lbinds) go
+lintLHsBinds lbinds = do
+    ctx <- getLinterCtx
+    sequence_ $ listify (go ctx) lbinds
   where
-    go (GhcPlugins.L loc expr) = case expr of
-      HsSyn.HsWrap _ _ e  -> go $ GhcPlugins.L loc e
-      HsSyn.HsOverLit _ l -> lintHsOverLit loc l
-      _                   -> pure ()
+    go ctx (GhcPlugins.L loc expr) = case expr of
+      HsSyn.HsWrap _ _ e  -> go ctx $ GhcPlugins.L loc e
+      HsSyn.HsOverLit _ l -> Just $ lintHsOverLit ctx loc l
+      _                   -> Nothing
 
-    checkExpr x = isJust (cast x :: Maybe (HsSyn.LHsExpr HsSyn.GhcTc))
+listify :: Typeable r => (r -> Maybe a) -> SYB.GenericQ [a]
+listify f = SYB.everything (++) $ [] `SYB.mkQ` \x -> toList $ f x
 
-lintHsOverLit :: GhcPlugins.SrcSpan -> HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM ()
-lintHsOverLit loc lit = checkHsOverLit lit >>= \case
+newtype LinterCtx = LinterCtx
+  { getBSTyConNames :: [GhcPlugins.Name]
+  }
+
+getLinterCtx :: TcM.TcM LinterCtx
+getLinterCtx = do
+    hscEnv <- TcM.getTopEnv
+    bsTns <- foldM collectBsTns []
+      [ strictByteStringTyConNameM hscEnv
+      , lazyByteStringTyConNameM hscEnv
+      ]
+    pure $ LinterCtx
+      { getBSTyConNames = bsTns
+      }
+  where
+    collectBsTns xs tnM = tnM <&> \case
+      Just tn -> tn : xs
+      Nothing -> xs
+
+    strictByteStringTyConNameM hscEnv = do
+      let strictByteStringName = GhcPlugins.mkModuleName "Data.ByteString.Internal"
+      fr <- liftIO $ Finder.findImportedModule hscEnv strictByteStringName bytestringPackage
+      case fr of
+        Finder.Found _ md -> do
+          bsTn <- IfaceEnv.lookupOrig md $ GhcPlugins.mkTcOcc "ByteString"
+          pure $ Just bsTn
+        _ -> pure Nothing
+
+    lazyByteStringTyConNameM hscEnv = do
+      let lazyByteStringModule = GhcPlugins.mkModuleName "Data.ByteString.Lazy.Internal"
+      fr <- liftIO $ Finder.findImportedModule hscEnv lazyByteStringModule bytestringPackage
+      case fr of
+        Finder.Found _ md -> do
+          bsTn <- IfaceEnv.lookupOrig md $ GhcPlugins.mkTcOcc "ByteString"
+          pure $ Just bsTn
+        _ -> pure Nothing
+
+    bytestringPackage = Just $ GhcPlugins.fsLit "bytestring"
+
+lintHsOverLit :: LinterCtx -> GhcPlugins.SrcSpan -> HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM ()
+lintHsOverLit ctx loc lit = case checkHsOverLit ctx lit of
     Right{} -> pure ()
     Left l  -> do
       dynFlags <- GhcPlugins.getDynFlags
@@ -48,54 +91,22 @@ lintHsOverLit loc lit = checkHsOverLit lit >>= \case
           warnMsg = ErrUtils.mkPlainWarnMsg dynFlags loc msg
       in Bag.unitBag warnMsg
 
-checkHsOverLit :: HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM (Either String ())
-checkHsOverLit lit = do
-  ml <- getByteStringLiteral lit
-  pure $ case ml of
-    Just l
-      | not $ isValidByteStringLiteral l -> Left l
-    _ -> pure ()
+checkHsOverLit :: LinterCtx -> HsSyn.HsOverLit HsSyn.GhcTc -> Either String ()
+checkHsOverLit ctx lit = case getByteStringLiteral ctx lit of
+  Just l | not $ isValidByteStringLiteral l -> Left l
+  _ -> pure ()
 
-isByteStringTyCon :: GhcPlugins.TyCon -> TcM.TcM Bool
-isByteStringTyCon tyCon = do
-    hscEnv <- TcM.getTopEnv
-    orMFB
-      [ strictByteStringTyConNameM hscEnv
-      , lazyByteStringTyConNameM hscEnv
-      ]
+isByteStringTyCon :: LinterCtx -> GhcPlugins.TyCon -> Bool
+isByteStringTyCon ctx tyCon = any (tn ==) $ getBSTyConNames ctx
   where
     tn = GhcPlugins.tyConName tyCon
 
-    strictByteStringTyConNameM hscEnv = do
-      fr <- liftIO $ Finder.findImportedModule hscEnv strictByteStringModule bytestringPackage
-      case fr of
-        Finder.Found _ md -> do
-          bsTn <- IfaceEnv.lookupOrig md $ GhcPlugins.mkTcOcc "ByteString"
-          pure $ bsTn == tn
-        _ -> pure False
-
-    lazyByteStringTyConNameM hscEnv = do
-      fr <- liftIO $ Finder.findImportedModule hscEnv lazyByteStringModule bytestringPackage
-      case fr of
-        Finder.Found _ md -> do
-          bsTn <- IfaceEnv.lookupOrig md $ GhcPlugins.mkTcOcc "ByteString"
-          pure $ bsTn == tn
-        _ -> pure False
-
-    bytestringPackage = Just $ GhcPlugins.fsLit "bytestring"
-
-    strictByteStringModule = GhcPlugins.mkModuleName "Data.ByteString.Internal"
-    lazyByteStringModule = GhcPlugins.mkModuleName "Data.ByteString.Lazy.Internal"
-
-    orMFB ms = foldr (\m mb -> m >>= \x -> if x then pure x else mb) (pure False) ms
-    {-# INLINE orMFB #-}
-
-getByteStringLiteral :: HsSyn.HsOverLit HsSyn.GhcTc -> TcM.TcM (Maybe String)
-getByteStringLiteral lit = case getIsStringLiteral lit of
-  Nothing -> pure Nothing
-  Just (l, tc) -> do
-    b <- isByteStringTyCon tc
-    pure $ if b then Just l else Nothing
+getByteStringLiteral :: LinterCtx -> HsSyn.HsOverLit HsSyn.GhcTc -> Maybe String
+getByteStringLiteral ctx lit = do
+  (l, tc) <- getIsStringLiteral lit
+  if isByteStringTyCon ctx tc
+    then pure l
+    else Nothing
 
 getIsStringLiteral :: HsSyn.HsOverLit HsSyn.GhcTc -> Maybe (String, GhcPlugins.TyCon)
 getIsStringLiteral (HsSyn.OverLit {
