@@ -102,23 +102,20 @@ isByteStringTyCon ctx tyCon = any (tn ==) $ getBSTyConNames ctx
     tn = GhcPlugins.tyConName tyCon
 
 getByteStringLiteral :: LinterCtx -> HsSyn.HsOverLit HsSyn.GhcTc -> Maybe String
-getByteStringLiteral ctx lit = do
-  (l, tc) <- getIsStringLiteral lit
-  if isByteStringTyCon ctx tc
-    then pure l
-    else Nothing
-
-getIsStringLiteral :: HsSyn.HsOverLit HsSyn.GhcTc -> Maybe (String, GhcPlugins.TyCon)
-getIsStringLiteral (HsSyn.OverLit {
-    HsSyn.ol_val = HsSyn.HsIsString _ l,
-    HsSyn.ol_ext = HsSyn.OverLitTc _ ty
-  }) = do
-    tc <- GhcPlugins.tyConAppTyCon_maybe ty
-    pure (GhcPlugins.unpackFS l, tc)
-getIsStringLiteral _ = Nothing
+getByteStringLiteral ctx lit = case lit of
+  HsSyn.OverLit
+    { HsSyn.ol_val = HsSyn.HsIsString _ l
+    , HsSyn.ol_ext = HsSyn.OverLitTc _ ty
+    } -> do
+      tc <- GhcPlugins.tyConAppTyCon_maybe ty
+      if isByteStringTyCon ctx tc
+        then pure $ GhcPlugins.unpackFS l
+        else Nothing
+  HsSyn.OverLit{}  -> Nothing
+  HsSyn.XOverLit{} -> Nothing
 
 isValidByteStringLiteral :: String -> Bool
 isValidByteStringLiteral lit = all isWord8Char lit
 
 isWord8Char :: Char -> Bool
-isWord8Char c = Char.ord c <= 256
+isWord8Char c = Char.ord c < 256
